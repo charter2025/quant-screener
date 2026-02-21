@@ -33,17 +33,14 @@ const UNIVERSE = [
   "DIS","SBUX","NKE","AXP","MDLZ","DKS","TGT","LOW","F","GM"
 ];
 
-// Fallback: deterministic simulated data (used when API data unavailable)
 function seededRandom(seed) {
   let h = 0;
   for (let i = 0; i < seed.length; i++) h = (Math.imul(31, h) + seed.charCodeAt(i)) | 0;
-  return (Math.sin(h + 1) * 10000) % 1;
+  return Math.abs(Math.sin(h + 1) * 10000) % 1;
 }
-function abs(v) { return v < 0 ? -v : v; }
-function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 function simulateStock(ticker) {
-  const r = offset => abs(seededRandom(ticker + String(offset)));
+  const r = offset => Math.abs(seededRandom(ticker + String(offset)));
   const mom12m   = r(1) * 120 - 30;
   const rsi      = 30 + r(2) * 50;
   const pe       = 8  + r(3) * 55;
@@ -55,25 +52,26 @@ function simulateStock(ticker) {
   const epsG     = -15 + r(9)  * 80;
   const revG     = -5  + r(10) * 45;
   const fwdRev   = -15 + r(11) * 30;
+  const clamp = (v, lo=0, hi=1) => Math.max(lo, Math.min(hi, v));
 
   return {
     ticker,
     sector: SECTOR_MAP[ticker] || "Other",
     lastUpdated: new Date().toISOString().split("T")[0],
     momentum: {
-      score: clamp((mom12m / 90 * 0.7) + ((rsi - 30) / 50 * 0.3), 0, 1),
+      score: clamp(mom12m/90*0.7 + (rsi-30)/50*0.3),
       mom12m: mom12m.toFixed(1), rsi: rsi.toFixed(0),
     },
     value: {
-      score: clamp(1 - ((pe/63*0.4) + (pfcf/70*0.3) + (evEbitda/36*0.3)), 0, 1),
+      score: clamp(1-((pe/63*0.4)+(pfcf/70*0.3)+(evEbitda/36*0.3))),
       pe: pe.toFixed(1), pfcf: pfcf.toFixed(1), evEbitda: evEbitda.toFixed(1),
     },
     quality: {
-      score: clamp((Math.max(0,roe)/75*0.4) + (grossM/85*0.4) + ((1-debtEq/3)*0.2), 0, 1),
+      score: clamp((Math.max(0,roe)/75*0.4)+(grossM/85*0.4)+((1-debtEq/3)*0.2)),
       roe: roe.toFixed(1), grossMargin: grossM.toFixed(1), debtEq: debtEq.toFixed(2),
     },
     growth: {
-      score: clamp((Math.max(-1,epsG)/65*0.4) + (Math.max(-1,revG)/40*0.35) + ((fwdRev+15)/45*0.25), 0, 1),
+      score: clamp((Math.max(-1,epsG)/65*0.4)+(Math.max(-1,revG)/40*0.35)+((fwdRev+15)/45*0.25)),
       epsGrowth: epsG.toFixed(1), revGrowth: revG.toFixed(1), fwdEpsRevision: fwdRev.toFixed(1),
     },
   };
@@ -86,14 +84,12 @@ function composite(stock, weights) {
     + stock.growth.score   * weights.growth;
 }
 
-// ── UI primitives ─────────────────────────────────────────────────────────────
-
 const ScoreBar = ({ score, color }) => (
-  <div style={{ display:"flex", alignItems:"center", gap:"6px" }}>
-    <div style={{ flex:1, height:"4px", background:"#1a1a2e", borderRadius:"2px", overflow:"hidden" }}>
-      <div style={{ width:`${score*100}%`, height:"100%", background:color, borderRadius:"2px", transition:"width 0.5s ease" }} />
+  <div style={{ display:"flex", alignItems:"center", gap:"4px" }}>
+    <div style={{ flex:1, height:"3px", background:"#1a1a2e", borderRadius:"2px", overflow:"hidden", minWidth:"30px" }}>
+      <div style={{ width:`${score*100}%`, height:"100%", background:color, borderRadius:"2px" }} />
     </div>
-    <span style={{ fontSize:"10px", color:"#888", minWidth:"26px", textAlign:"right" }}>
+    <span style={{ fontSize:"9px", color:"#888", minWidth:"20px", textAlign:"right" }}>
       {(score*100).toFixed(0)}
     </span>
   </div>
@@ -101,43 +97,166 @@ const ScoreBar = ({ score, color }) => (
 
 const Badge = ({ label, color }) => (
   <span style={{
-    fontSize:"9px", fontWeight:"700", padding:"2px 6px", borderRadius:"3px",
+    fontSize:"8px", fontWeight:"700", padding:"1px 4px", borderRadius:"3px",
     background:`${color}22`, color, border:`1px solid ${color}44`,
-    letterSpacing:"0.5px", textTransform:"uppercase",
+    letterSpacing:"0.3px", textTransform:"uppercase", whiteSpace:"nowrap",
   }}>{label}</span>
 );
 
-// ── Main App ──────────────────────────────────────────────────────────────────
+const css = `
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #080810; overflow-x: hidden; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    min-height: calc(100vh - 90px);
+  }
+
+  .sidebar {
+    background: #0a0a18;
+    border-right: 1px solid #1a1a30;
+    padding: 16px 14px;
+  }
+
+  .main {
+    padding: 16px 20px;
+    min-width: 0;
+  }
+
+  .table-header {
+    display: grid;
+    grid-template-columns: 24px 64px 56px 1fr 70px 70px 70px 70px 76px;
+    gap: 6px;
+    padding: 5px 8px;
+    font-size: 7px;
+    color: #444;
+    letter-spacing: 2px;
+    font-weight: 700;
+    border-bottom: 1px solid #1a1a30;
+    margin-bottom: 4px;
+    font-family: 'Courier New', monospace;
+  }
+
+  .table-row {
+    display: grid;
+    grid-template-columns: 24px 64px 56px 1fr 70px 70px 70px 70px 76px;
+    gap: 6px;
+    padding: 7px 8px;
+    border-bottom: 1px solid #0f0f20;
+    cursor: pointer;
+    align-items: center;
+    font-family: 'Courier New', monospace;
+    transition: background 0.15s;
+    border-left: 2px solid transparent;
+  }
+
+  .detail-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+
+  .sliders-toggle { display: none; }
+
+  @media (max-width: 768px) {
+    .layout {
+      grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+      border-right: none;
+      border-bottom: 1px solid #1a1a30;
+      padding: 12px;
+    }
+
+    .sliders-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      margin-bottom: 0;
+    }
+
+    .sliders-content {
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+
+    .sliders-content.collapsed {
+      max-height: 0;
+    }
+
+    .sliders-content.expanded {
+      max-height: 500px;
+    }
+
+    .main {
+      padding: 10px 8px;
+    }
+
+    .table-header {
+      grid-template-columns: 20px 52px 44px 1fr 52px 52px 76px;
+      gap: 4px;
+      font-size: 6.5px;
+    }
+
+    .table-header .hide-mobile { display: none; }
+
+    .table-row {
+      grid-template-columns: 20px 52px 44px 1fr 52px 52px 76px;
+      gap: 4px;
+      padding: 6px 6px;
+    }
+
+    .table-row .hide-mobile { display: none; }
+
+    .detail-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 400px) {
+    .table-header {
+      grid-template-columns: 18px 46px 36px 1fr 46px 76px;
+      gap: 3px;
+    }
+    .table-header .hide-mobile2 { display: none; }
+    .table-row {
+      grid-template-columns: 18px 46px 36px 1fr 46px 76px;
+      gap: 3px;
+    }
+    .table-row .hide-mobile2 { display: none; }
+  }
+`;
 
 export default function App() {
-  const [stocks, setStocks]   = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [dataSource, setDataSource] = useState("live");  // "live" | "simulated"
+  const [stocks, setStocks]     = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [dataSource, setDataSource] = useState("live");
   const [lastUpdated, setLastUpdated] = useState("");
-  const [weights, setWeights] = useState({ momentum:0.25, value:0.25, quality:0.25, growth:0.25 });
-  const [tab, setTab]         = useState("buys");
+  const [weights, setWeights]   = useState({ momentum:0.25, value:0.25, quality:0.25, growth:0.25 });
+  const [tab, setTab]           = useState("buys");
   const [selected, setSelected] = useState(null);
-  const [status, setStatus]   = useState("Fetching market data...");
+  const [status, setStatus]     = useState("Fetching market data...");
+  const [slidersOpen, setSlidersOpen] = useState(false);
 
-  // ── Data fetch: try live API first, fall back to simulation ─────────────────
   useEffect(() => {
     async function load() {
       setLoading(true);
       try {
         setStatus("Connecting to data feed...");
-        // Vercel serverless function writes to /data/stocks.json daily
         const res = await fetch("/data/stocks.json");
         if (!res.ok) throw new Error("No live data");
         const json = await res.json();
         setStatus("Parsing factor scores...");
-        await new Promise(r => setTimeout(r, 400));
+        await new Promise(r => setTimeout(r, 300));
         setStocks(json.stocks);
         setLastUpdated(json.generatedAt || "");
         setDataSource("live");
       } catch {
-        // Fall back to client-side simulation
-        setStatus("Live data unavailable — using simulated factors...");
-        await new Promise(r => setTimeout(r, 600));
+        setStatus("Using simulated data...");
+        await new Promise(r => setTimeout(r, 400));
         setStocks(UNIVERSE.map(simulateStock));
         setDataSource("simulated");
         setLastUpdated(new Date().toISOString().split("T")[0]);
@@ -154,203 +273,220 @@ export default function App() {
   const buys  = ranked.slice(0, 20);
   const sells = ranked.slice(-20).reverse();
   const rows  = tab === "buys" ? buys : sells;
+  const accent = tab === "buys" ? "#00ff9d" : "#ff4444";
 
   const updateWeight = (factor, val) => {
-    const next = { ...weights, [factor]: val / 100 };
+    const next = { ...weights, [factor]: val/100 };
     const total = Object.values(next).reduce((a,b) => a+b, 0);
     setWeights(Object.fromEntries(Object.entries(next).map(([k,v]) => [k, v/total])));
   };
 
-  const accent = tab === "buys" ? "#00ff9d" : "#ff4444";
-
   return (
-    <div style={{ fontFamily:"'Courier New', monospace", background:"#080810", minHeight:"100vh", color:"#e0e0e0" }}>
+    <>
+      <style>{css}</style>
+      <div style={{ fontFamily:"'Courier New', monospace", background:"#080810", minHeight:"100vh", color:"#e0e0e0" }}>
 
-      {/* ── Header ── */}
-      <div style={{ background:"linear-gradient(135deg,#0d0d1a,#111128)", borderBottom:"1px solid #1e1e3a", padding:"20px 28px 16px" }}>
-        <div style={{ display:"flex", alignItems:"baseline", gap:"12px", marginBottom:"4px" }}>
-          <span style={{ fontSize:"11px", letterSpacing:"4px", color:"#00ff9d", fontWeight:"700" }}>▸ QUANT ALPHA ENGINE</span>
-          <span style={{ fontSize:"10px", color:"#444", letterSpacing:"2px" }}>S&P 500 · MULTI-FACTOR</span>
-          {!loading && (
-            <span style={{
-              marginLeft:"auto", fontSize:"9px", padding:"2px 8px", borderRadius:"3px",
-              background: dataSource === "live" ? "#00ff9d22" : "#ff6b3522",
-              color:      dataSource === "live" ? "#00ff9d"   : "#ff6b35",
-              border:`1px solid ${dataSource === "live" ? "#00ff9d44" : "#ff6b3544"}`,
-            }}>
-              {dataSource === "live" ? "● LIVE DATA" : "◌ SIMULATED"}
-            </span>
-          )}
-        </div>
-        <h1 style={{ margin:0, fontSize:"24px", fontWeight:"700", color:"#f0f0f0", letterSpacing:"-0.5px" }}>
-          Factor Signal Scanner
-        </h1>
-        <p style={{ margin:"4px 0 0", fontSize:"11px", color:"#555", letterSpacing:"0.5px" }}>
-          {loading ? status : `${stocks.length} stocks · 4-factor composite · Updated ${lastUpdated}`}
-        </p>
-      </div>
-
-      <div style={{ display:"grid", gridTemplateColumns:"260px 1fr", minHeight:"calc(100vh - 100px)" }}>
-
-        {/* ── Sidebar ── */}
-        <div style={{ background:"#0a0a18", borderRight:"1px solid #1a1a30", padding:"20px 16px" }}>
-          <div style={{ fontSize:"9px", letterSpacing:"3px", color:"#444", marginBottom:"16px", fontWeight:"700" }}>
-            FACTOR WEIGHTS
-          </div>
-          {Object.entries(FACTORS).map(([key, f]) => (
-            <div key={key} style={{ marginBottom:"20px" }}>
-              <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
-                <span style={{ fontSize:"11px", color:f.color, fontWeight:"700", letterSpacing:"1px", textTransform:"uppercase" }}>{f.label}</span>
-                <span style={{ fontSize:"11px", color:"#888" }}>{(weights[key]*100).toFixed(0)}%</span>
+        {/* Header */}
+        <div style={{ background:"linear-gradient(135deg,#0d0d1a,#111128)", borderBottom:"1px solid #1e1e3a", padding:"14px 16px 12px" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:"10px", flexWrap:"wrap" }}>
+            <div>
+              <div style={{ fontSize:"10px", letterSpacing:"3px", color:"#00ff9d", fontWeight:"700", marginBottom:"2px" }}>
+                ▸ QUANT ALPHA ENGINE
               </div>
-              <input type="range" min="5" max="70"
-                value={Math.round(weights[key]*100)}
-                onChange={e => updateWeight(key, parseInt(e.target.value))}
-                style={{ width:"100%", accentColor:f.color, cursor:"pointer", height:"3px" }}
-              />
-              <div style={{ fontSize:"9px", color:"#444", marginTop:"4px" }}>
-                {key==="momentum" && "12m-1m return · RSI · trend strength"}
-                {key==="value"    && "P/E · EV/EBITDA · P/FCF"}
-                {key==="quality"  && "ROE · gross margin · D/E ratio"}
-                {key==="growth"   && "EPS · revenue · fwd revisions"}
-              </div>
+              <h1 style={{ fontSize:"20px", fontWeight:"700", color:"#f0f0f0", letterSpacing:"-0.5px", lineHeight:1 }}>
+                Factor Signal Scanner
+              </h1>
             </div>
-          ))}
-
-          <div style={{ borderTop:"1px solid #1a1a30", paddingTop:"16px", marginTop:"8px" }}>
-            <div style={{ fontSize:"9px", letterSpacing:"3px", color:"#444", marginBottom:"10px", fontWeight:"700" }}>MODEL INFO</div>
-            <p style={{ fontSize:"10px", color:"#555", lineHeight:"1.6", margin:0 }}>
-              Stocks scored 0–100 on four factor families, normalized within sector.
-              Weighted composite drives the final rank.
-            </p>
-            <p style={{ fontSize:"10px", color:"#444", lineHeight:"1.6", margin:"8px 0 0" }}>
-              Top 20 = <span style={{color:"#00ff9d"}}>buys</span> &nbsp;·&nbsp; Bottom 20 = <span style={{color:"#ff4444"}}>sells</span>
-            </p>
-            <p style={{ fontSize:"10px", color:"#333", lineHeight:"1.6", margin:"8px 0 0" }}>
-              Data refreshes daily at 6 AM ET via scheduled Vercel function pulling Yahoo Finance.
-            </p>
-          </div>
-        </div>
-
-        {/* ── Main ── */}
-        <div style={{ padding:"20px 24px" }}>
-          {loading ? (
-            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:"400px", gap:"16px" }}>
-              <div style={{ width:"40px", height:"40px", border:"2px solid #1a1a30", borderTop:"2px solid #00ff9d", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
-              <style>{`@keyframes spin { to { transform:rotate(360deg) } }`}</style>
-              <div style={{ fontSize:"11px", color:"#555", letterSpacing:"2px" }}>{status}</div>
-            </div>
-          ) : (
-            <>
-              {/* Tabs */}
-              <div style={{ display:"flex", gap:"2px", marginBottom:"20px" }}>
-                {[["buys","▲ TOP 20 BUYS","#00ff9d"],["sells","▼ TOP 20 SELLS","#ff4444"]].map(([t,label,c]) => (
-                  <button key={t} onClick={() => { setTab(t); setSelected(null); }} style={{
-                    padding:"8px 20px", background:tab===t?`${c}15`:"transparent",
-                    border:`1px solid ${tab===t?c:"#1a1a30"}`, color:tab===t?c:"#444",
-                    borderRadius:"4px", cursor:"pointer", fontSize:"10px",
-                    letterSpacing:"2px", fontWeight:"700", fontFamily:"'Courier New',monospace",
-                    transition:"all 0.2s",
-                  }}>{label}</button>
-                ))}
-                <div style={{ flex:1 }} />
-                <span style={{ fontSize:"10px", color:"#333", alignSelf:"center", letterSpacing:"1px" }}>
-                  CLICK ROW FOR DETAIL ▸
-                </span>
-              </div>
-
-              {/* Table header */}
-              <div style={{
-                display:"grid", gridTemplateColumns:"28px 80px 70px 1fr 80px 80px 80px 80px 90px",
-                gap:"8px", padding:"6px 10px",
-                fontSize:"8px", color:"#444", letterSpacing:"2px", fontWeight:"700",
-                borderBottom:"1px solid #1a1a30", marginBottom:"4px",
+            {!loading && (
+              <span style={{
+                marginLeft:"auto", fontSize:"9px", padding:"2px 8px", borderRadius:"3px",
+                background: dataSource==="live" ? "#00ff9d22" : "#ff6b3522",
+                color:      dataSource==="live" ? "#00ff9d"   : "#ff6b35",
+                border:`1px solid ${dataSource==="live" ? "#00ff9d44" : "#ff6b3544"}`,
+                whiteSpace:"nowrap",
               }}>
-                <span>#</span><span>TICKER</span><span>SECTOR</span>
-                <span>SIGNAL DRIVERS</span>
-                <span>MOM</span><span>VALUE</span><span>QUAL</span><span>GROW</span>
-                <span style={{textAlign:"right"}}>SCORE</span>
-              </div>
+                {dataSource==="live" ? "● LIVE" : "◌ SIM"}
+              </span>
+            )}
+          </div>
+          <p style={{ margin:"4px 0 0", fontSize:"10px", color:"#555" }}>
+            {loading ? status : `${stocks.length} stocks · Updated ${lastUpdated}`}
+          </p>
+        </div>
 
-              {/* Rows */}
-              {rows.map((stock, i) => {
-                const isSelected = selected === stock.ticker;
-                const fScores = { Momentum:stock.momentum.score, Value:stock.value.score, Quality:stock.quality.score, Growth:stock.growth.score };
-                const sorted  = Object.entries(fScores).sort((a,b)=>b[1]-a[1]);
-                const drivers = sorted.slice(0,2).map(([k])=>k);
-                const drags   = sorted.slice(-1).map(([k])=>k);
+        <div className="layout">
 
-                return (
-                  <div key={stock.ticker}>
-                    <div onClick={() => setSelected(isSelected ? null : stock.ticker)} style={{
-                      display:"grid", gridTemplateColumns:"28px 80px 70px 1fr 80px 80px 80px 80px 90px",
-                      gap:"8px", padding:"8px 10px",
-                      borderBottom:"1px solid #0f0f20",
-                      cursor:"pointer",
-                      background: isSelected ? `${accent}08` : i%2===0 ? "#0a0a18" : "#080810",
-                      borderLeft:`2px solid ${isSelected ? accent : "transparent"}`,
-                      transition:"all 0.15s", alignItems:"center",
-                    }}>
-                      <span style={{ fontSize:"10px", color:"#444" }}>{i+1}</span>
-                      <span style={{ fontSize:"13px", fontWeight:"700", color:accent, letterSpacing:"0.5px" }}>{stock.ticker}</span>
-                      <span style={{ fontSize:"9px", color:"#555" }}>{stock.sector}</span>
-                      <div style={{ display:"flex", gap:"4px", flexWrap:"wrap" }}>
-                        {drivers.map(d => <Badge key={d} label={d} color={FACTORS[d.toLowerCase()]?.color || "#888"} />)}
-                      </div>
-                      {["momentum","value","quality","growth"].map(f => (
-                        <ScoreBar key={f} score={stock[f].score} color={FACTORS[f].color} />
-                      ))}
-                      <div style={{ textAlign:"right" }}>
-                        <span style={{ fontSize:"14px", fontWeight:"700",
-                          color: stock.composite > 0.65 ? "#00ff9d" : stock.composite > 0.45 ? "#ffcc00" : "#ff4444" }}>
-                          {(stock.composite*100).toFixed(1)}
-                        </span>
-                      </div>
-                    </div>
+          {/* Sidebar */}
+          <div className="sidebar">
+            {/* Mobile toggle */}
+            <div className="sliders-toggle" onClick={() => setSlidersOpen(o => !o)}>
+              <span style={{ fontSize:"9px", letterSpacing:"3px", color:"#444", fontWeight:"700" }}>FACTOR WEIGHTS</span>
+              <span style={{ color:"#444", fontSize:"12px" }}>{slidersOpen ? "▲" : "▼"}</span>
+            </div>
 
-                    {/* Detail panel */}
-                    {isSelected && (
-                      <div style={{
-                        background:"#0c0c1e", border:`1px solid ${accent}33`,
-                        borderTop:"none", padding:"16px", marginBottom:"2px",
-                      }}>
-                        <div style={{ fontSize:"11px", color:accent, fontWeight:"700", marginBottom:"12px", letterSpacing:"2px" }}>
-                          ▸ {stock.ticker} · FACTOR BREAKDOWN
-                        </div>
-                        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:"12px" }}>
-                          {Object.entries(FACTORS).map(([key, f]) => {
-                            const fd = stock[key];
-                            return (
-                              <div key={key} style={{ background:"#080810", border:`1px solid ${f.color}22`, borderRadius:"6px", padding:"12px" }}>
-                                <div style={{ fontSize:"9px", color:f.color, letterSpacing:"2px", fontWeight:"700", marginBottom:"8px" }}>{f.label.toUpperCase()}</div>
-                                <div style={{ fontSize:"18px", fontWeight:"700", color:"#f0f0f0", marginBottom:"8px" }}>
-                                  {(fd.score*100).toFixed(0)}<span style={{ fontSize:"10px", color:"#555" }}>/100</span>
-                                </div>
-                                <div style={{ fontSize:"10px", color:"#666", lineHeight:"1.7" }}>
-                                  {key==="momentum" && <>{`12m Ret: `}<span style={{color:parseFloat(fd.mom12m)>0?"#00ff9d":"#ff4444"}}>{fd.mom12m>0?"+":""}{fd.mom12m}%</span><br/>RSI: {fd.rsi}</>}
-                                  {key==="value"    && <>{`P/E: ${fd.pe}x`}<br/>{`EV/EBITDA: ${fd.evEbitda}x`}<br/>{`P/FCF: ${fd.pfcf}x`}</>}
-                                  {key==="quality"  && <>{`ROE: ${fd.roe}%`}<br/>{`Gross Margin: ${fd.grossMargin}%`}<br/>{`D/E: ${fd.debtEq}x`}</>}
-                                  {key==="growth"   && <>{`EPS Growth: ${fd.epsGrowth>0?"+":""}${fd.epsGrowth}%`}<br/>{`Rev Growth: ${fd.revGrowth>0?"+":""}${fd.revGrowth}%`}<br/>{`Fwd Rev: ${fd.fwdEpsRevision>0?"+":""}${fd.fwdEpsRevision}%`}</>}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div style={{ marginTop:"12px", fontSize:"11px", color:"#555", lineHeight:"1.8" }}>
-                          <span style={{color:accent}}>■</span>{" "}
-                          {tab==="buys"?"BUY":"SELL"} THESIS: {stock.ticker} ranks in the {tab==="buys"?"top":"bottom"} quintile
-                          driven by strong <span style={{color:"#e0e0e0"}}>{drivers.join(" + ")}</span> signals.
-                          {drags.length > 0 && <> Watch: weaker <span style={{color:"#888"}}>{drags[0]}</span> score.</>}
-                        </div>
-                      </div>
-                    )}
+            {/* Desktop label (always visible on desktop) */}
+            <div style={{ fontSize:"9px", letterSpacing:"3px", color:"#444", fontWeight:"700", marginBottom:"14px" }}
+              className="sliders-toggle-desktop">
+            </div>
+
+            <div className={`sliders-content ${slidersOpen ? "expanded" : "collapsed"}`}
+              style={{ paddingTop: slidersOpen ? "12px" : 0 }}>
+              {Object.entries(FACTORS).map(([key, f]) => (
+                <div key={key} style={{ marginBottom:"16px" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"5px" }}>
+                    <span style={{ fontSize:"10px", color:f.color, fontWeight:"700", letterSpacing:"1px", textTransform:"uppercase" }}>{f.label}</span>
+                    <span style={{ fontSize:"10px", color:"#888" }}>{(weights[key]*100).toFixed(0)}%</span>
                   </div>
-                );
-              })}
-            </>
-          )}
+                  <input type="range" min="5" max="70"
+                    value={Math.round(weights[key]*100)}
+                    onChange={e => updateWeight(key, parseInt(e.target.value))}
+                    style={{ width:"100%", accentColor:f.color, cursor:"pointer" }}
+                  />
+                  <div style={{ fontSize:"8px", color:"#444", marginTop:"3px" }}>
+                    {key==="momentum" && "12m return · RSI · trend"}
+                    {key==="value"    && "P/E · EV/EBITDA · P/FCF"}
+                    {key==="quality"  && "ROE · margins · leverage"}
+                    {key==="growth"   && "EPS · revenue · revisions"}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Always show on desktop */}
+            <style>{`
+              @media (min-width: 769px) {
+                .sliders-toggle { display: none !important; }
+                .sliders-content { max-height: none !important; overflow: visible !important; }
+                .sliders-content.collapsed { max-height: none !important; }
+              }
+              @media (max-width: 768px) {
+                .sliders-toggle-desktop { display: none; }
+              }
+            `}</style>
+
+            <div style={{ borderTop:"1px solid #1a1a30", paddingTop:"12px", marginTop:"4px" }}>
+              <p style={{ fontSize:"9px", color:"#444", lineHeight:"1.6" }}>
+                Top 20 = <span style={{color:"#00ff9d"}}>buys</span> · Bottom 20 = <span style={{color:"#ff4444"}}>sells</span><br/>
+                Data refreshes daily 6AM ET via Yahoo Finance.
+              </p>
+            </div>
+          </div>
+
+          {/* Main */}
+          <div className="main">
+            {loading ? (
+              <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", height:"300px", gap:"14px" }}>
+                <div style={{ width:"36px", height:"36px", border:"2px solid #1a1a30", borderTop:"2px solid #00ff9d", borderRadius:"50%", animation:"spin 0.8s linear infinite" }} />
+                <style>{`@keyframes spin { to { transform:rotate(360deg) } }`}</style>
+                <div style={{ fontSize:"10px", color:"#555", letterSpacing:"2px" }}>{status}</div>
+              </div>
+            ) : (
+              <>
+                {/* Tabs */}
+                <div style={{ display:"flex", gap:"4px", marginBottom:"14px", flexWrap:"wrap" }}>
+                  {[["buys","▲ TOP 20 BUYS","#00ff9d"],["sells","▼ TOP 20 SELLS","#ff4444"]].map(([t,label,c]) => (
+                    <button key={t} onClick={() => { setTab(t); setSelected(null); }} style={{
+                      padding:"6px 14px", background:tab===t?`${c}15`:"transparent",
+                      border:`1px solid ${tab===t?c:"#1a1a30"}`, color:tab===t?c:"#444",
+                      borderRadius:"4px", cursor:"pointer", fontSize:"9px",
+                      letterSpacing:"1.5px", fontWeight:"700", fontFamily:"'Courier New',monospace",
+                    }}>{label}</button>
+                  ))}
+                </div>
+
+                {/* Table header */}
+                <div className="table-header">
+                  <span>#</span>
+                  <span>TICKER</span>
+                  <span>SECTOR</span>
+                  <span>SIGNALS</span>
+                  <span className="hide-mobile">MOM</span>
+                  <span className="hide-mobile">VAL</span>
+                  <span className="hide-mobile2">QUAL</span>
+                  <span>GROW</span>
+                  <span style={{textAlign:"right"}}>SCORE</span>
+                </div>
+
+                {/* Rows */}
+                {rows.map((stock, i) => {
+                  const isSelected = selected === stock.ticker;
+                  const fScores = { Momentum:stock.momentum.score, Value:stock.value.score, Quality:stock.quality.score, Growth:stock.growth.score };
+                  const sorted  = Object.entries(fScores).sort((a,b) => b[1]-a[1]);
+                  const drivers = sorted.slice(0,2).map(([k])=>k);
+                  const drags   = sorted.slice(-1).map(([k])=>k);
+
+                  return (
+                    <div key={stock.ticker}>
+                      <div
+                        className="table-row"
+                        onClick={() => setSelected(isSelected ? null : stock.ticker)}
+                        style={{
+                          background: isSelected ? `${accent}08` : i%2===0 ? "#0a0a18" : "#080810",
+                          borderLeft:`2px solid ${isSelected ? accent : "transparent"}`,
+                        }}
+                      >
+                        <span style={{ fontSize:"9px", color:"#444" }}>{i+1}</span>
+                        <span style={{ fontSize:"12px", fontWeight:"700", color:accent, letterSpacing:"0.5px" }}>{stock.ticker}</span>
+                        <span style={{ fontSize:"8px", color:"#555", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{stock.sector}</span>
+                        <div style={{ display:"flex", gap:"3px", flexWrap:"wrap", overflow:"hidden" }}>
+                          {drivers.map(d => <Badge key={d} label={d.slice(0,3)} color={FACTORS[d.toLowerCase()]?.color || "#888"} />)}
+                        </div>
+                        <div className="hide-mobile"><ScoreBar score={stock.momentum.score} color={FACTORS.momentum.color} /></div>
+                        <div className="hide-mobile"><ScoreBar score={stock.value.score} color={FACTORS.value.color} /></div>
+                        <div className="hide-mobile2"><ScoreBar score={stock.quality.score} color={FACTORS.quality.color} /></div>
+                        <ScoreBar score={stock.growth.score} color={FACTORS.growth.color} />
+                        <div style={{ textAlign:"right" }}>
+                          <span style={{ fontSize:"13px", fontWeight:"700",
+                            color: stock.composite>0.65?"#00ff9d":stock.composite>0.45?"#ffcc00":"#ff4444" }}>
+                            {(stock.composite*100).toFixed(1)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Detail panel */}
+                      {isSelected && (
+                        <div style={{
+                          background:"#0c0c1e", border:`1px solid ${accent}33`,
+                          borderTop:"none", padding:"12px", marginBottom:"2px",
+                        }}>
+                          <div style={{ fontSize:"10px", color:accent, fontWeight:"700", marginBottom:"10px", letterSpacing:"2px" }}>
+                            ▸ {stock.ticker} · BREAKDOWN
+                          </div>
+                          <div className="detail-grid">
+                            {Object.entries(FACTORS).map(([key, f]) => {
+                              const fd = stock[key];
+                              return (
+                                <div key={key} style={{ background:"#080810", border:`1px solid ${f.color}22`, borderRadius:"6px", padding:"10px" }}>
+                                  <div style={{ fontSize:"8px", color:f.color, letterSpacing:"2px", fontWeight:"700", marginBottom:"6px" }}>{f.label.toUpperCase()}</div>
+                                  <div style={{ fontSize:"16px", fontWeight:"700", color:"#f0f0f0", marginBottom:"6px" }}>
+                                    {(fd.score*100).toFixed(0)}<span style={{ fontSize:"9px", color:"#555" }}>/100</span>
+                                  </div>
+                                  <div style={{ fontSize:"9px", color:"#666", lineHeight:"1.7" }}>
+                                    {key==="momentum" && <><span style={{color:parseFloat(fd.mom12m)>0?"#00ff9d":"#ff4444"}}>{fd.mom12m>0?"+":""}{fd.mom12m}%</span> 12m<br/>RSI {fd.rsi}</>}
+                                    {key==="value"    && <>P/E {fd.pe}x<br/>EV/EBITDA {fd.evEbitda}x</>}
+                                    {key==="quality"  && <>ROE {fd.roe}%<br/>Margin {fd.grossMargin}%</>}
+                                    {key==="growth"   && <>EPS {fd.epsGrowth>0?"+":""}{fd.epsGrowth}%<br/>Rev {fd.revGrowth>0?"+":""}{fd.revGrowth}%</>}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <div style={{ marginTop:"10px", fontSize:"10px", color:"#555", lineHeight:"1.7" }}>
+                            <span style={{color:accent}}>■</span>{" "}
+                            {tab==="buys"?"BUY":"SELL"} THESIS: {stock.ticker} driven by{" "}
+                            <span style={{color:"#e0e0e0"}}>{drivers.join(" + ")}</span>.
+                            {drags.length>0 && <> Watch: weaker <span style={{color:"#888"}}>{drags[0]}</span>.</>}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
