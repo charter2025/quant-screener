@@ -204,7 +204,7 @@ export default function App() {
             onClick={() => isMobile && setSlidersOpen(o => !o)}
             style={{ display:"flex", alignItems:"center", justifyContent:"space-between", cursor: isMobile ? "pointer" : "default", marginBottom: (!isMobile || slidersOpen) ? "14px" : "0" }}
           >
-            <span style={{ fontSize:"9px", letterSpacing:"3px", color:"#444", fontWeight:"700" }}>FACTOR WEIGHTS</span>
+            <span style={{ fontSize:"9px", letterSpacing:"3px", color:"#00ff9d", fontWeight:"700" }}>⚡ FACTOR WEIGHTS</span>
             {isMobile && <span style={{ color:"#555", fontSize:"11px" }}>{slidersOpen ? "▲ HIDE" : "▼ SHOW"}</span>}
           </div>
 
