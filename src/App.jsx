@@ -104,8 +104,15 @@ const Badge = ({ label, color }) => (
 );
 
 const css = `
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #080810; overflow-x: hidden; }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body, #root {
+    width: 100%;
+    min-height: 100vh;
+    background: #080810;
+    overflow-x: hidden;
+  }
+  body { -webkit-text-size-adjust: 100%; }
+  meta[name="viewport"] { width: device-width; }
 
   .layout {
     display: grid;
